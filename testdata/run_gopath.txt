@@ -1,0 +1,126 @@
+# Tests for gopherjs run command in GOPATH mode. Includes checks
+# for behaviour, staleness and output side effects (e.g. files in
+# $GOPATH/pkg)
+#
+# A change from the original GopherJS here, we do _not_ now install a
+# dependency in $GOPATH/pkg unless explicitly asked to do so by gopherjs
+# install (i.e. not this command). Also, we allow run to take zero
+# argument (implies current directory) or a list of package patterns
+# that resolve to a single package.
+
+env HOME=$WORK/home
+mkdir $HOME
+env GOPATH=$WORK/go
+
+cd go/src/example.com/hello
+
+cp blah/blah.go.fish blah/blah.go
+
+# Ensure that we get the "same" output from a file arg or an implicit
+# or explicit package argument. We don't have a neat way (yet) of
+# comparing the main.js output with the package output, allowing for the
+# difference in pkg name
+! exists $GOPATH/pkg $GOPATH/bin
+gopherjs run main.go and peas
+stdout '^Today we will eat fish and peas$'
+! stderr .+
+! exists $GOPATH/pkg $GOPATH/bin
+gopherjs run example.com/hello and peas
+stdout '^Today we will eat fish and peas$'
+! stderr .+
+! exists $GOPATH/pkg $GOPATH/bin
+gopherjs run . and peas
+stdout '^Today we will eat fish and peas$'
+! stderr .+
+! exists $GOPATH/pkg $GOPATH/bin
+! gopherjs run
+stderr '^gopherjs run: no go files listed$'
+! gopherjs run ./... and peas
+! stdout .+
+stderr '^gopherjs run: pattern ./... matches multiple packages:$'
+! exists $GOPATH/pkg $GOPATH/bin
+
+# Ensure that gopherjs run does not work for a non-main package. But
+# whilst we're there, check that we can still run the main package from
+# outside of its directory
+cd blah
+! gopherjs run .
+! stdout .+
+stderr '^gopherjs run: example.com/hello/blah is not a main package$'
+gopherjs run example.com/hello and peas
+stdout '^Today we will eat fish and peas$'
+! stderr .+
+cd ..
+! gopherjs run example.com/hello/blah
+! stdout .+
+stderr '^gopherjs run: example.com/hello/blah is not a main package$'
+
+# Staleness checks
+cp blah/blah.go.chips blah/blah.go
+gopherjs run . and peas
+stdout '^Today we will eat chips and peas$'
+! stderr .+
+gopherjs run --tags thin . and peas
+stdout '^Today we will eat thin chips and peas$'
+! stderr .+
+
+-- go/src/example.com/hello/main.go --
+package main
+
+import "strings"
+import "os"
+import "example.com/hello/blah"
+
+func main() {
+        print("Today we will eat", blah.Name, strings.Join(os.Args[1:], " "))
+}
+
+-- go/src/example.com/hello/main_test.go.fish --
+package main
+
+import "fmt"
+import "testing"
+import "example.com/hello/blah"
+
+
+func TestBlah(t *testing.T) {
+  fmt.Println(blah.Name)
+  if exp := "fish"; blah.Name != exp {
+    t.Fatalf("expected %v; got %v", exp, blah.Name)
+  }
+}
+
+-- go/src/example.com/hello/main_test.go.chips --
+// +build !thin
+
+package main
+
+import "fmt"
+import "testing"
+import "example.com/hello/blah"
+
+
+func TestBlah(t *testing.T) {
+  fmt.Println(blah.Name)
+  if exp := "chips"; blah.Name != exp {
+    t.Fatalf("expected %v; got %v", exp, blah.Name)
+  }
+}
+
+-- go/src/example.com/hello/blah/blah.go.fish --
+package blah
+
+const Name = "fish"
+
+-- go/src/example.com/hello/blah/blah.go.chips --
+// +build !thin
+
+package blah
+const Name = "chips"
+
+-- go/src/example.com/hello/blah/blahthin.go --
+// +build thin
+
+package blah
+const Name = "thin chips"
+
